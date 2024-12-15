@@ -1,11 +1,12 @@
 import express from 'express';
 import pg from 'pg';
+import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
 
-const {Client} = pg;
+const { Client } = pg;
 
 const client = new Client({
   user: process.env.DB_USER,
@@ -19,7 +20,6 @@ client.connect()
   .then(() => console.log('Database connected'))
   .catch(err => console.log('Connection error', err.stack));
 
-// Middleware, joka käsittelee JSON-dataa
 app.use(express.json());
 
 
@@ -27,8 +27,8 @@ app.use(express.json());
 app.post('/genres', async (req, res) => {
   const { name } = req.body;
   try {
-    const result = await client.query('INSERT INTO genres (name) VALUES ($1) RETURNING *', [name]);
-    res.status(201).json(result.rows[0]);
+    await client.query('INSERT INTO genres (name) VALUES ($1)', [name]);
+    res.status(201).json({ message: 'Genre added successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -38,11 +38,11 @@ app.post('/genres', async (req, res) => {
 app.post('/movies', async (req, res) => {
   const { name, year, genre_id } = req.body;
   try {
-    const result = await client.query(
-      'INSERT INTO movies (name, year, genre_id) VALUES ($1, $2, $3) RETURNING *',
+    await client.query(
+      'INSERT INTO movies (name, year, genre_id) VALUES ($1, $2, $3)',
       [name, year, genre_id]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ message: 'Movie added successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -51,12 +51,17 @@ app.post('/movies', async (req, res) => {
 // 3. Registering user
 app.post('/users', async (req, res) => {
   const { name, username, password, year_of_birth } = req.body;
+  
   try {
-    const result = await client.query(
-      'INSERT INTO users (name, username, password, year_of_birth) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name, username, password, year_of_birth]
+    // Hash the password before saving it
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    await client.query(
+      'INSERT INTO users (name, username, password, year_of_birth) VALUES ($1, $2, $3, $4)',
+      [name, username, hashedPassword, year_of_birth]
     );
-    res.status(201).json(result.rows[0]);
+    
+    res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -80,12 +85,18 @@ app.get('/movies/:id', async (req, res) => {
 app.delete('/movies/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await client.query('DELETE FROM movies WHERE id = $1 RETURNING *', [id]);
-    if (result.rows.length === 0) {
+    const resultReviews = await client.query('SELECT * FROM reviews WHERE movie_id = $1', [id]
+    );
+    if (resultReviews.rows.length > 0) {
+      return res.status(400).json({ error: 'Movie cannot be deleted because it has reviews' });
+    }
+    const result = await client.query('DELETE FROM movies WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Movie not found' });
     }
-    res.json({ message: 'Movie deleted successfully', movie: result.rows[0] });
+    res.json({ message: 'Movie deleted successfully' });
   } catch (error) {
+    console.error(error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -113,19 +124,20 @@ app.get('/movies/search', async (req, res) => {
     );
     res.json(result.rows);
   } catch (error) {
+    console.error(error.message);
     res.status(500).json({ error: error.message });
   }
-});
+}); 
 
 // 8. Adding movie review
 app.post('/reviews', async (req, res) => {
   const { username, stars, text, movie_id } = req.body;
   try {
-    const result = await client.query(
-      'INSERT INTO reviews (username, stars, text, movie_id) VALUES ($1, $2, $3, $4) RETURNING *',
+    await client.query(
+      'INSERT INTO reviews (username, stars, text, movie_id) VALUES ($1, $2, $3, $4)',
       [username, stars, text, movie_id]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ message: 'Review added successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -135,11 +147,11 @@ app.post('/reviews', async (req, res) => {
 app.post('/favorite_movies', async (req, res) => {
   const { user_id, movie_id } = req.body;
   try {
-    const result = await client.query(
-      'INSERT INTO favorite_movies (user_id, movie_id) VALUES ($1, $2) RETURNING *',
+    await client.query(
+      'INSERT INTO favorite_movies (user_id, movie_id) VALUES ($1, $2)',
       [user_id, movie_id]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ message: 'Favorite movie added successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -161,7 +173,6 @@ app.get('/favorite_movies/:username', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 app.listen(3001, () => {
   console.log('Server running on port 3001');
